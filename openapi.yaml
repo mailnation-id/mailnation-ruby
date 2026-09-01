@@ -1,0 +1,370 @@
+openapi: 3.1.0
+info:
+  title: Mailnation Email API
+  version: "1.0.0"
+  description: |
+    One Email API. Send html, text, attachments, custom headers, and tags.
+    Delivery is asynchronous. Authenticate with the SMTP username and password
+    from the dashboard, or a customer JWT. `Idempotency-Key` is required on send.
+  contact:
+    email: support@mailnation.id
+servers:
+  - url: https://api.mailnation.id
+    description: Production
+security:
+  - basicAuth: []
+  - bearerAuth: []
+tags:
+  - name: Emails
+    description: Send and inspect messages
+paths:
+  /emails:
+    post:
+      tags: [Emails]
+      operationId: createEmail
+      summary: Send an email
+      description: |
+        Accepts the message, reserves 1 credit per unique recipient, and queues delivery.
+        Returns 202. Poll `GET /emails/{id}` for per-recipient status.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEmailRequest"
+            examples:
+              otp:
+                summary: OTP
+                value:
+                  from: noreply@example.com
+                  to:
+                    - user@gmail.com
+                  subject: Your code
+                  html: "<p>847291</p>"
+                  text: "847291"
+              invoice:
+                summary: Invoice with attachment
+                value:
+                  from: billing@example.com
+                  to:
+                    - user@gmail.com
+                  subject: Invoice #8891
+                  html: "<p>Invoice terlampir.</p>"
+                  headers:
+                    X-Invoice: "8891"
+                  tags:
+                    - invoice
+                  attachments:
+                    - filename: invoice.pdf
+                      content_type: application/pdf
+                      content: JVBERi0xLjQ=
+      responses:
+        "202":
+          description: Accepted and queued
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateEmailResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "402":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /emails/{id}:
+    get:
+      tags: [Emails]
+      operationId: getEmail
+      summary: Get an email
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Message and recipients
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetEmailResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: SMTP username and password from the dashboard
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Client-chosen key, 1–255 characters. Scoped to the SMTP credential. TTL 24 hours.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+        example: order-123-email
+  headers:
+    RequestID:
+      schema:
+        type: string
+        example: req_01JEXAMPLE
+  responses:
+    Error:
+      description: Error
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestID"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    CreateEmailRequest:
+      type: object
+      required: [from, to, subject]
+      properties:
+        from:
+          type: string
+          format: email
+        to:
+          oneOf:
+            - type: string
+              format: email
+            - type: array
+              items:
+                type: string
+                format: email
+        cc:
+          oneOf:
+            - type: string
+              format: email
+            - type: array
+              items:
+                type: string
+                format: email
+        bcc:
+          oneOf:
+            - type: string
+              format: email
+            - type: array
+              items:
+                type: string
+                format: email
+        reply_to:
+          type: string
+          format: email
+        subject:
+          type: string
+          maxLength: 500
+        text:
+          type: string
+        html:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          description: Custom MIME headers. Reserved names (From, To, Subject, Content-Type, …) are rejected.
+        tags:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+          description: Up to 20 tags. Written as X-Mailnation-Tag on the message.
+        attachments:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/Attachment"
+      description: Provide `text`, `html`, and/or `attachments`. Unique addresses across to, cc, and bcc are billed once each (max 50). MIME max 10 MiB.
+    CreateEmailResponse:
+      type: object
+      required: [id, status, source, request_id]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [queued]
+        source:
+          type: string
+          enum: [api]
+        from:
+          type: string
+        to:
+          type: array
+          items:
+            type: string
+        cc:
+          type: array
+          items:
+            type: string
+        bcc:
+          type: array
+          items:
+            type: string
+        reply_to:
+          type: string
+        subject:
+          type: string
+        billing_status:
+          type: string
+          enum: [reserved, settled, released]
+        recipient_count:
+          type: integer
+        credits_reserved:
+          type: integer
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        tags:
+          type: array
+          items:
+            type: string
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttachmentMeta"
+        request_id:
+          type: string
+    Attachment:
+      type: object
+      required: [filename, content]
+      properties:
+        filename:
+          type: string
+        content:
+          type: string
+          description: Base64
+        content_type:
+          type: string
+        content_id:
+          type: string
+          description: Set for inline images (cid)
+    AttachmentMeta:
+      type: object
+      properties:
+        filename:
+          type: string
+        content_type:
+          type: string
+        size:
+          type: integer
+        content_id:
+          type: string
+    GetEmailResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [queued, delivered, partial, failed]
+        source:
+          type: string
+          enum: [smtp, api, test]
+        from:
+          type: string
+        subject:
+          type: string
+        billing_status:
+          type: string
+        recipient_count:
+          type: integer
+        credits_reserved:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        recipients:
+          type: array
+          items:
+            $ref: "#/components/schemas/Recipient"
+        request_id:
+          type: string
+    Recipient:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        status:
+          type: string
+        billing_status:
+          type: string
+        attempt_count:
+          type: integer
+        last_smtp_code:
+          type: integer
+          nullable: true
+        last_smtp_response:
+          type: string
+          nullable: true
+        delivered_at:
+          type: string
+          format: date-time
+          nullable: true
+        bounced_at:
+          type: string
+          format: date-time
+          nullable: true
+    Error:
+      type: object
+      required: [error, code, request_id]
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          enum:
+            - invalid_request
+            - unauthorized
+            - forbidden
+            - not_found
+            - conflict
+            - insufficient_credits
+            - rate_limited
+            - warmup_limited
+            - account_suspended
+            - payload_too_large
+            - service_unavailable
+            - temporary_failure
+            - internal_error
+            - idempotency_conflict
+            - idempotency_in_progress
+        request_id:
+          type: string
