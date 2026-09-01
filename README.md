@@ -26,7 +26,7 @@ res = client.emails.send(
 puts res["id"]
 ```
 
-Repo: https://github.com/riyanathariq/mailnation-ruby
+Repo: https://github.com/mailnation-id/mailnation-ruby
 
 ## License
 
